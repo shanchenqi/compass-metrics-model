@@ -1318,6 +1318,523 @@ class CodeQualityGuaranteeMetricsModel(MetricsModel):
                 data = [item[i],item['grimoire_creation_date']]
                 last_metrics_data[i] = data
 
+class DeveloperAttractionRetention(MetricsModel):
+    def __init__(self, C0_index, issue_index, pr_index,  json_file, git_index, company, out_index,  from_date, end_date, pr_comments_index, issue_comments_index, community=None, level=None):
+        super().__init__(json_file, from_date, end_date, out_index, community, level)
+        self.issue_index = issue_index
+        self.all_project = get_all_project(self.json_file)
+        self.all_repo = get_all_repo(
+            self.json_file, self.issue_index.split('_')[0])
+        self.model_name = 'Developer Attraction and Retention'
+        self.pr_index = pr_index
+        self.git_index = git_index
+        self.company = company
+        self.C0_index = C0_index
+        self.es_out_C0_index = 'metrics_model_c0_users'
+        self.es_out_C0 = ElasticSearch(elastic_url,  self.es_out_C0_index)
+        self.pr_comments_index = pr_comments_index
+        self.issue_comments_index = issue_comments_index
+
+    # name list of author_name in a index
+    def get_all_CX_contributors(self, repos_list, search_index, pr=False, issue=False, from_date=str_to_datetime("1970-01-01"), to_date=datetime_utcnow()):
+        query_CX_users = {
+            "aggs": {
+                "name": {
+                    "terms": {
+                        "field": "author_name",
+                        "size": 100000
+                    }, "aggs": {
+                        "date": {
+                            "top_hits": {
+                                "sort": [{
+                                    "grimoire_creation_date": {"order": "asc"}
+                                }],
+                                "size": 1
+                            }
+                        }
+                    }
+                }
+            },
+            "query": {
+                "bool": {
+                    "should": [
+                        {
+                            "simple_query_string": {
+                                "query": i+"(*) OR " + i+"*",
+                                "fields": [
+                                    "tag"
+                                ]
+                            }
+                        } for i in repos_list
+                    ],
+                    "minimum_should_match": 1,
+                    "filter": {
+                        "range": {
+                            "grimoire_creation_date": {
+                                "gte": from_date.strftime("%Y-%m-%d"), "lte": to_date.strftime("%Y-%m-%d")
+                            }
+                        }
+                    }
+                }
+            },
+            "size": 0,
+            "from": 0
+        }
+        if pr:
+            query_CX_users["query"]["bool"]["must"] = {
+                "match_phrase": {
+                    "pull_request": "true"
+                }
+            }
+        if issue:
+            query_CX_users["query"]["bool"]["must"] = {
+                "match_phrase": {
+                    "pull_request": "false"
+                }
+            }
+        CX_contributors = self.es_in.search(index=search_index, body=query_CX_users)[
+            "aggregations"]["name"]["buckets"]
+        return [i["date"]["hits"]["hits"][0]["_source"] for i in CX_contributors]
+
+    # active C0_users in last 90 days seperated by inside and outside
+    def get_C0_contributors(self, date, repos_list):
+        C0_users = self.get_all_CX_contributors(
+            repos_list, (self.C0_index), from_date=date-timedelta(days=90), to_date=date)
+        C0_users_count = len(C0_users)
+        
+        return C0_users_count
+
+    def D1_preserve_activity_all(self, date, repos_list):
+        D1_users = 0
+        active_users = 0
+        for i in self.all_D1:
+            # if i['author_name'] in self.users and self.users[i['author_name']]!= self.company:
+            if str_to_datetime(i["grimoire_creation_date"]) > (date-timedelta(days=90)) and str_to_datetime(i["grimoire_creation_date"]) < (date-timedelta(days=60)):
+                D1_users += 1
+                query_i = self.get_query_return_contributor_date(
+                    i["author_name"], repos_list, from_date=(date-timedelta(days=30)), to_date=date)
+                res_i = self.es_in.search(
+                    index=(self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=query_i)["hits"]
+                if res_i["total"]['value'] > 0:
+                    active_users += 1
+        return D1_users, active_users
+
+    # active D0_users in last 90 days seperated by inside and outside
+    def D0_contributors(self, date, repos_list):
+        D0_users = self.get_all_CX_contributors(
+            repos_list, (self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), from_date=date-timedelta(days=90), to_date=date)
+        D0_users_count = len(D0_users)
+      
+        return D0_users_count
+
+    # active D1_users in last 90 days seperated by inside and outside
+    def D1_contributors(self, date, repos_list):
+        D1_users = self.get_all_CX_contributors(
+            repos_list, (self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), from_date=date-timedelta(days=90), to_date=date)
+        D1_users_count = len(D1_users)
+        
+        return D1_users_count
+
+    # active C1_users in last 90 days seperated by inside and outside
+    def get_C1_contributors(self, date, repos_list):
+        C1_users = self.get_all_CX_contributors(
+            repos_list, (self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), from_date=date-timedelta(days=90), to_date=date)
+        C1_users_count = len(C1_users)
+        
+        return C1_users_count
+
+
+    # The cout of contributor who contributes more than twice all
+    def recontribute_ALL_D0_count(self, date, repos_list):
+        # turn D0 to D1 contributer templete
+        query_D0_users = self.get_uuid_count_contribute_query(
+            repos_list, size=10000, company=None, from_date=(date-timedelta(days=90)), to_date=date)
+        # D0_contributors = self.es_in.search(index=(self.C0_index, self.git_index,self.issue_index,self.pr_index), body=query_D0_users)["hits"]["hits"]
+        D0_contributors = self.es_in.search(index=(
+            self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=query_D0_users)["hits"]["hits"]
+        if len(D0_contributors) == 0:
+            return 0, 0
+        D0_users = [D0["_source"]["author_name"] for D0 in D0_contributors]
+        D0_users = set(D0_users)
+        re_contributor = 0
+        for i in D0_users:
+            re_developer = self.get_query_return_contributor_date(
+                i, repos_list, from_date=(date-timedelta(days=90)), to_date=date)
+            # res = self.es_in.search(index=(self.C0_index, self.git_index,self.issue_index,self.pr_index), body=re_developer)['hits']
+            res = self.es_in.search(index=(
+                self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=re_developer)['hits']
+            if res["total"]['value'] > 1:
+                re_contributor += 1
+
+        return re_contributor, len(D0_users)
+
+   
+
+    def wake_up_all_D0_count(self, date, repos_list):
+        query_D0_users = self.get_uuid_count_contribute_query(
+            repos_list, size=10000, company=None, from_date=(date - timedelta(days=90)), to_date=(date-timedelta(days=60)))
+        D0_contributors = self.es_in.search(index=(
+            self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=query_D0_users)["hits"]["hits"]
+        if len(D0_contributors) == 0:
+            return 0, 0
+        D0_users = [D0["_source"]["author_name"] for D0 in D0_contributors]
+        D0_users = set(D0_users)
+        D0_outside = 0
+        wake_contributor = 0
+
+        for i in D0_users:
+            if i in self.users:
+                if self.users[i] != self.company:
+                    D0_outside += 1
+                    sleep_user_query = self.get_query_return_contributor_date(
+                        i, repos_list, from_date=(date-timedelta(days=60)), to_date=(date-timedelta(days=30)))
+                    wake_user_query = self.get_query_return_contributor_date(
+                        i, repos_list, from_date=(date-timedelta(days=30)), to_date=date)
+                    sleep_res = self.es_in.search(index=(
+                        self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=sleep_user_query)['hits']
+                    wake_res = self.es_in.search(index=(
+                        self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=wake_user_query)['hits']
+                    if sleep_res["total"]['value'] == 0 and wake_res["total"]['value']:
+                        wake_contributor += 1
+            else:
+                company_developer = self.get_query_return_contributor_date(
+                    i, repos_list)
+                res = self.es_in.search(
+                    index=self.git_index, body=company_developer)['hits']
+                if res["total"]['value'] > 0:
+                    self.users[i] = res["hits"][0]["_source"]["author_org_name"]
+                    if self.users[i] != self.company:
+                        D0_outside += 1
+                        sleep_user_query = self.get_query_return_contributor_date(
+                            i, repos_list, from_date=(date-timedelta(days=60)), to_date=(date-timedelta(days=30)))
+                        wake_user_query = self.get_query_return_contributor_date(
+                            i, repos_list, from_date=(date-timedelta(days=30)), to_date=date)
+                        sleep_res = self.es_in.search(index=(
+                            self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=sleep_user_query)['hits']
+                        wake_res = self.es_in.search(index=(
+                            self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=wake_user_query)['hits']
+                        if sleep_res["total"]['value'] == 0 and wake_res["total"]['value']:
+                            wake_contributor += 1
+                else:
+                    self.users[i] = "Unknown"
+                    D0_outside += 1
+                    sleep_user_query = self.get_query_return_contributor_date(
+                        i, repos_list, from_date=(date-timedelta(days=60)), to_date=(date-timedelta(days=30)))
+                    wake_user_query = self.get_query_return_contributor_date(
+                        i, repos_list, from_date=(date-timedelta(days=30)), to_date=date)
+                    sleep_res = self.es_in.search(index=(
+                        self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=sleep_user_query)['hits']
+                    wake_res = self.es_in.search(index=(
+                        self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=wake_user_query)['hits']
+                    if sleep_res["total"]['value'] == 0 and wake_res["total"]['value']:
+                        wake_contributor += 1
+
+        return wake_contributor, D0_outside
+
+    # C2, D2count in last 90 days
+    def contributor_count_D2(self, date, repos_list):
+        query_author_uuid_data = self.get_uuid_count_contribute_query(
+            repos_list, company=None, from_date=(date - timedelta(days=90)), to_date=date)
+        author_uuid_count = self.es_in.search(index=(self.git_index), body=query_author_uuid_data)[
+            'aggregations']["count_of_contributors"]['value']
+        return author_uuid_count
+
+   
+    def get_query_return_contributor_date(self, name, repos_list, from_date=str_to_datetime("1970-01-01"), to_date=datetime_utcnow()):
+        query = {
+            "size": 1,
+            "query": {
+                "bool": {
+                    "must": [
+                        {
+                            "match_phrase": {
+                                "author_name": name
+                            }
+                        },
+                        {
+                            "bool": {
+                                "should": [{
+                                    "simple_query_string": {
+                                        "query": i+"(*) OR " + i+"*",
+                                        "fields": ["tag"]
+                                    }}for i in repos_list],
+                                "minimum_should_match": 1,
+                                "filter":
+                                {"range":
+                                    {"grimoire_creation_date":
+                                     {"gte": from_date.strftime("%Y-%m-%d"), "lt": to_date.strftime("%Y-%m-%d")}}}
+                            }
+                        }
+                    ]
+                }
+            },
+            "sort": [
+                {
+                    "grimoire_creation_date": {
+                        "order": "asc"
+                    }
+                }
+            ]
+
+        }
+        return query
+
+    # Turn to C0 contributor
+    def C0_convertions(self, date, repos_list):
+        outside_C0_contributors = 0
+        for i in self.all_C0:
+            if str_to_datetime(i["grimoire_creation_date"]) > (date-timedelta(days=90)) and str_to_datetime(i["grimoire_creation_date"]) < date:
+                if i['author_name'] in self.users and self.users[i['author_name']] != self.company:
+                    outside_C0_contributors += 1
+                elif i["author_name"] not in self.users:
+                    company_developer = self.get_query_return_contributor_date(
+                        i['author_name'], repos_list)
+                    res = self.es_in.search(
+                        index=self.git_index, body=company_developer)['hits']
+                    if res["total"]['value'] > 0:
+                        self.users[i["author_name"]
+                                   ] = res["hits"][0]["_source"]["author_org_name"]
+                        if self.users[i["author_name"]] != self.company:
+                            outside_C0_contributors += 1
+                    else:
+                        self.users[i["author_name"]] = "Unknown"
+                        outside_C0_contributors += 1
+        return outside_C0_contributors
+
+   
+    def all_C1_convertions(self, date, repos_list):
+        # C0_users = [i['author_name'] for i in self.all_C0]
+        C1_count = 0
+
+        for i in self.all_C1:
+            if str_to_datetime(i["grimoire_creation_date"])>(date-timedelta(days=90)) and str_to_datetime(i["grimoire_creation_date"])<date:
+                C1_count += 1
+        return C1_count
+
+    # Turn to C2 contributor count and time
+    def all_C2_convertions(self, date, repos_list):
+        C0_users = [i['author_name'] for i in self.all_C0]
+        C1_users = [i['author_name'] for i in self.all_C1]
+        turn_C2_time = []
+        for i in self.all_C2:
+            if str_to_datetime(i["grimoire_creation_date"]) > (date-timedelta(days=90)) and str_to_datetime(i["grimoire_creation_date"]) < date:
+
+                if i["author_name"] in C1_users:
+                    C1_time = self.all_C1[C1_users.index(
+                        i["author_name"])]["grimoire_creation_date"]
+                    diff_time = get_time_diff_days(
+                        i["grimoire_creation_date"], C1_time)
+                    turn_C2_time.append(diff_time if diff_time > 0 else 0.0)
+                elif i["author_name"] in C0_users:
+                    C0_time = self.all_C0[C0_users.index(
+                        i["author_name"])]["grimoire_creation_date"]
+                    diff_time = get_time_diff_days(
+                        i["grimoire_creation_date"], C0_time)
+                    turn_C2_time.append(diff_time if diff_time > 0 else 0.0)
+                else:
+                    turn_C2_time.append(0)
+
+        return round(sum(turn_C2_time) / len(turn_C2_time), 4) if len(turn_C2_time) else 0.0, len(turn_C2_time)
+
+    # inside and outside C1 contributors created issue or pr 贡献量
+    def C1_contributions(self, date, repos_list):
+        query_issue_created = self.get_uuid_count_query(
+            "cardinality", repos_list, "uuid", date_field='grimoire_creation_date', size=0, from_date=(date-timedelta(days=90)), to_date=date)
+        updated_issues_count = self.es_in.search(index=(
+            self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=query_issue_created)["hits"]["total"]["value"]
+        C1_users = self.get_all_CX_contributors(
+            repos_list, (self.issue_index, self.pr_index), from_date=date-timedelta(days=90), to_date=date)
+        return  updated_issues_count
+    
+    def C1_pr_create_convertions(self, date, repos_list):
+        C1_pr_create_convertions_count = 0
+        for i in self.all_C1_pr_creater:
+            if str_to_datetime(i["grimoire_creation_date"])>(date-timedelta(days=90)) and str_to_datetime(i["grimoire_creation_date"])<date:
+                C1_pr_create_convertions_count += 1
+        return C1_pr_create_convertions_count
+    
+    def C1_issue_create_convertions(self, date, repos_list):
+        C1_issue_create_convertions_count = 0
+        for i in self.all_C1_issue_creater:
+            if str_to_datetime(i["grimoire_creation_date"])>(date-timedelta(days=90)) and str_to_datetime(i["grimoire_creation_date"])<date:
+                C1_issue_create_convertions_count += 1
+        return C1_issue_create_convertions_count
+
+    def active_C1_pr_create_contributor(self, date, repos_list):
+        C1_pr_contributors = self.get_all_CX_contributors(
+            repos_list, (self.pr_index), pr=True, from_date=date-timedelta(days=90), to_date=date)
+        return len(C1_pr_contributors)
+
+    def active_C1_issue_create_contributor(self, date, repos_list):
+        C1_pr_contributors = self.get_all_CX_contributors(
+            repos_list, (self.issue_index), issue=True, from_date=date-timedelta(days=90), to_date=date)
+        return len(C1_pr_contributors)
+
+    def C1_pr_comments_convertions(self, date, repos_list):
+        C1_pr_comments_convertions_count = 0
+        for i in self.all_C1_pr_comments_creater:
+            if str_to_datetime(i["grimoire_creation_date"])>(date-timedelta(days=90)) and str_to_datetime(i["grimoire_creation_date"])<date:
+                C1_pr_comments_convertions_count += 1
+        return C1_pr_comments_convertions_count
+    
+    def C1_issue_comments_convertions(self, date, repos_list):
+        C1_issue_comments_convertions_count = 0
+        for i in self.all_C1_issue_comments_creater:
+            if str_to_datetime(i["grimoire_creation_date"])>(date-timedelta(days=90)) and str_to_datetime(i["grimoire_creation_date"])<date:
+                C1_issue_comments_convertions_count += 1
+        return C1_issue_comments_convertions_count
+
+    def active_C1_pr_comments_contributor(self, date, repos_list):
+        C1_pr_comments_contributors = self.get_all_CX_comments_contributors(
+            repos_list, (self.pr_comments_index), pr=True, from_date=date-timedelta(days=90), to_date=date)
+        return len(C1_pr_comments_contributors)
+
+    def active_C1_issue_comments_contributor(self, date, repos_list):
+        C1_issue_comments_contributors = self.get_all_CX_comments_contributors(
+            repos_list, (self.issue_comments_index), issue=True, from_date=date-timedelta(days=90), to_date=date)
+        return len(C1_issue_comments_contributors)
+
+    def get_all_CX_comments_contributors(self, repos_list, search_index, pr=False, issue=False, from_date=str_to_datetime("1970-01-01"), to_date=datetime_utcnow()):
+        query_CX_users = {
+            "aggs": {
+                "name": {
+                    "terms": {
+                        "field": "author_name",
+                        "size": 100000
+                    }, "aggs": {
+                        "date": {
+                            "top_hits": {
+                                "sort": [{
+                                    "grimoire_creation_date": {"order": "asc"}
+                                }],
+                                "size": 1
+                            }
+                        }
+                    }
+                }
+            },
+            "query": {
+                "bool": {
+                    "should": [
+                        {
+                            "simple_query_string": {
+                                "query": i+"(*) OR " + i+"*",
+                                "fields": [
+                                    "tag"
+                                ]
+                            }
+                        } for i in repos_list
+                    ],
+                    "minimum_should_match": 1,
+                    "filter": {
+                        "range": {
+                            "grimoire_creation_date": {
+                                "gte": from_date.strftime("%Y-%m-%d"), "lte": to_date.strftime("%Y-%m-%d")
+                            }
+                        }
+                    }
+                }
+            },
+            "size": 1,
+            "from": 0
+        }
+        if pr:
+            query_CX_users["query"]["bool"]["must"] = [
+                {
+                    "match_phrase": {
+                        "item_type": "comment"
+                    }
+                }]
+            # print(query_CX_users)
+        if issue:
+            query_CX_users["query"]["bool"]["must"] = [
+                {
+                    "match_phrase": {
+                        "item_type": "comment"
+                    }
+                }, {
+                    "match_phrase": {
+                        "issue_pull_request": "false"
+                    }
+                }]
+        CX_contributors = self.es_in.search(index=search_index, body=query_CX_users)[
+            "aggregations"]["name"]["buckets"]
+        all_contributors = [i["date"]["hits"]["hits"]
+                            [0]["_source"] for i in CX_contributors]
+        return all_contributors
+
+    def metrics_model_enrich(self, repos_list, label, company=None):
+        item_datas = []
+        # C0 users 存的是用户信息，第一次成为C0的时间
+        # self.all_C0 = self.get_all_CX_contributors(repos_list, search_index = self.C0_index)
+        self.all_C0 = []
+        self.all_C1 = self.get_all_CX_contributors(
+            repos_list, search_index=(self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index))
+        self.all_C2 = self.get_all_CX_contributors(
+            repos_list, search_index=self.git_index)
+        self.all_D1 = self.get_all_CX_contributors(
+            repos_list, search_index=(self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index))
+        self.all_C1_pr_creater = self.get_all_CX_contributors(repos_list, search_index=(self.pr_index))
+        self.all_C1_issue_creater = self.get_all_CX_contributors(repos_list, search_index=(self.issue_index))
+        self.all_C1_pr_comments_creater = self.get_all_CX_comments_contributors(repos_list, (self.pr_comments_index), pr=True)
+        self.all_C1_issue_comments_creater = self.get_all_CX_comments_contributors(repos_list, (self.issue_comments_index), issue=True,)
+
+
+        # users 存的是用户名，公司
+        self.users = {}
+
+        for date in self.date_list:
+            print(date)
+
+            created_since = self.created_since(date, repos_list)
+            if created_since < 0:
+                continue
+
+            activity_D0_contributors = self.D0_contributors(date, repos_list)
+            activity_D1_contributors = self.D1_contributors(date, repos_list)
+            C1_preserve_all = self.all_C1_convertions(date, repos_list)
+            C2_perserve_all = self.all_C2_convertions(date, repos_list)
+            recontribute_all_D0_count = self.recontribute_ALL_D0_count(
+                date, repos_list)
+            contributor_count_C1 = self.get_C1_contributors(date, repos_list)
+            D1_active_all = self.D1_preserve_activity_all(date, repos_list)
+            C1_contributions = self.C1_contributions(date, repos_list)
+            metrics_data = {
+                'uuid': uuid(str(date), self.community, self.level, label, self.model_name),
+                'level': self.level,
+                'label': label,
+                'model_name': self.model_name,
+                'contributor_count_D0': activity_D0_contributors,
+                'contributor_count_D1': activity_D1_contributors,
+                'contributor_count_D2': self.contributor_count_D2(date, repos_list),
+                'recontribute_all_D0_count': recontribute_all_D0_count[0],
+                'recontribute_all_D0_count_sum': recontribute_all_D0_count[1],
+                'all_D1_still_active': D1_active_all[1],
+                'all_D1_still_active_sum': D1_active_all[0],
+                'C1_preserve_all': C1_preserve_all,
+                'C2_preserve_Count_all': C2_perserve_all[1],
+                'C2_preserve_Time_all': C2_perserve_all[0],
+                'contributor_count_C1': contributor_count_C1,
+                'active_C1_pr_contributor': self.active_C1_pr_create_contributor(date, repos_list),
+                'active_C1_issue_contributor': self.active_C1_issue_create_contributor(date, repos_list),
+                'active_C1_pr_comments_contributor': self.active_C1_pr_comments_contributor(date, repos_list),
+                'active_C1_issue_comments_contributor': self.active_C1_issue_comments_contributor(date, repos_list),
+                'C1_convertions_all': self.all_C1_convertions(date, repos_list),
+                'C1_pr_create_convertions': self.C1_pr_create_convertions(date, repos_list),
+                'C1_issue_create_convertions': self.C1_issue_create_convertions(date, repos_list),
+                'C1_pr_comments_convertions': self.C1_pr_comments_convertions(date, repos_list),
+                'C1_issue_comments_convertions': self.C1_issue_comments_convertions(date, repos_list),
+                'C1_contributions_sum': C1_contributions,
+                'grimoire_creation_date': date.isoformat(),
+                'metadata__enriched_on': datetime_utcnow().isoformat()
+            }
+
+            item_datas.append(metrics_data)
+            if len(item_datas) > MAX_BULK_UPDATE_SIZE:
+                self.es_out.bulk_upload(item_datas, "uuid")
+                item_datas = []
+        self.es_out.bulk_upload(item_datas, "uuid")
+        item_datas = []
 
 if __name__ == '__main__':
     CONF = yaml.safe_load(open('../conf.yaml'))
@@ -1334,6 +1851,11 @@ if __name__ == '__main__':
     #     kwargs[item] = params[item]
     # model_community = CommunitySupportMetricsModel(**kwargs)
     # model_community.metrics_model_metrics(elastic_url)
+
+    # for item in ['issue_index', 'pr_index', 'json_file', 'git_index', 'from_date', 'end_date', 'out_index', 'community', 'level', 'company', 'pr_comments_index']:
+    #     kwargs[item] = params[item]
+    # model_code = CodeQualityGuaranteeMetricsModel(**kwargs)
+    # model_code.metrics_model_metrics()
 
     for item in ['issue_index', 'pr_index', 'json_file', 'git_index', 'from_date', 'end_date', 'out_index', 'community', 'level', 'company', 'pr_comments_index']:
         kwargs[item] = params[item]
