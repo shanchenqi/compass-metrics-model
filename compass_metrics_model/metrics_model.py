@@ -40,6 +40,7 @@ from grimoire_elk.elastic import ElasticSearch
 from .utils import (get_activity_score, 
                     community_support, 
                     code_quality_guarantee, 
+                    developer_attraction,
                     community_decay,
                     activity_decay,
                     code_quality_decay)
@@ -698,7 +699,6 @@ class ActivityMetricsModel(MetricsModel):
         author_uuid_count = self.es_in.search(index=(self.git_index), body=query_author_uuid_data)[
             'aggregations']["count_of_contributors"]['value']
         return author_uuid_count
-
 
     def metrics_model_enrich(self, repos_list, label):
         item_datas = []
@@ -1809,15 +1809,14 @@ class DeveloperAttractionRetention(MetricsModel):
                 # 'recontribute_all_D0_count_sum': recontribute_all_D0_count[1],
                 'all_D1_still_active': D1_active_all[1],
                 'all_D1_still_active_sum': D1_active_all[0],
-                'C1_preserve_all': C1_convertions_all,
-                'C2_preserve_Count_all': C2_convertions_all[1],
-                'C2_preserve_Time_all': C2_convertions_all[0],
+                'C1_attraction_count': C1_convertions_all,
+                'C2_attraction_count': C2_convertions_all[1],
+                'C2_convertion_Time_all': C2_convertions_all[0],
                 'contributor_count_C1': contributor_count_C1,
                 'active_C1_pr_contributor': self.active_C1_pr_create_contributor(date, repos_list),
                 'active_C1_issue_contributor': self.active_C1_issue_create_contributor(date, repos_list),
                 'active_C1_pr_comments_contributor': self.active_C1_pr_comments_contributor(date, repos_list),
                 'active_C1_issue_comments_contributor': self.active_C1_issue_comments_contributor(date, repos_list),
-                'C1_convertions_all': self.all_C1_convertions(date, repos_list),
                 'C1_pr_create_convertions': self.C1_pr_create_convertions(date, repos_list),
                 'C1_issue_create_convertions': self.C1_issue_create_convertions(date, repos_list),
                 'C1_pr_comments_convertions': self.C1_pr_comments_convertions(date, repos_list),
@@ -1826,7 +1825,8 @@ class DeveloperAttractionRetention(MetricsModel):
                 'grimoire_creation_date': date.isoformat(),
                 'metadata__enriched_on': datetime_utcnow().isoformat()
             }
-
+            score = developer_attraction(metrics_data)
+            metrics_data["developer_attraction_score"] = score
             item_datas.append(metrics_data)
             if len(item_datas) > MAX_BULK_UPDATE_SIZE:
                 self.es_out.bulk_upload(item_datas, "uuid")
