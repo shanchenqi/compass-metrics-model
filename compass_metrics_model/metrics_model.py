@@ -1405,7 +1405,8 @@ class DeveloperAttractionRetention(MetricsModel):
         C0_users_count = len(C0_users)
         
         return C0_users_count
-
+    
+    # D1 contributors who is active in past 60-90 day and last 30 days(30_days_retention_count) 
     def D1_preserve_activity_all(self, date, repos_list):
         D1_users = 0
         active_users = 0
@@ -1469,66 +1470,66 @@ class DeveloperAttractionRetention(MetricsModel):
 
         return re_contributor, len(D0_users)   
     
-    def wake_up_all_D0_count(self, date, repos_list):
-        query_D0_users = self.get_uuid_count_contribute_query(
-            repos_list, size=10000, company=None, from_date=(date - timedelta(days=90)), to_date=(date-timedelta(days=60)))
-        D0_contributors = self.es_in.search(index=(
-            self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=query_D0_users)["hits"]["hits"]
-        if len(D0_contributors) == 0:
-            return 0, 0
-        D0_users = [D0["_source"]["author_name"] for D0 in D0_contributors]
-        D0_users = set(D0_users)
-        D0_outside = 0
-        wake_contributor = 0
+    # def wake_up_all_D0_count(self, date, repos_list):
+    #     query_D0_users = self.get_uuid_count_contribute_query(
+    #         repos_list, size=10000, company=None, from_date=(date - timedelta(days=90)), to_date=(date-timedelta(days=60)))
+    #     D0_contributors = self.es_in.search(index=(
+    #         self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=query_D0_users)["hits"]["hits"]
+    #     if len(D0_contributors) == 0:
+    #         return 0, 0
+    #     D0_users = [D0["_source"]["author_name"] for D0 in D0_contributors]
+    #     D0_users = set(D0_users)
+    #     D0_outside = 0
+    #     wake_contributor = 0
 
-        for i in D0_users:
-            if i in self.users:
-                if self.users[i] != self.company:
-                    D0_outside += 1
-                    sleep_user_query = self.get_query_return_contributor_date(
-                        i, repos_list, from_date=(date-timedelta(days=60)), to_date=(date-timedelta(days=30)))
-                    wake_user_query = self.get_query_return_contributor_date(
-                        i, repos_list, from_date=(date-timedelta(days=30)), to_date=date)
-                    sleep_res = self.es_in.search(index=(
-                        self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=sleep_user_query)['hits']
-                    wake_res = self.es_in.search(index=(
-                        self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=wake_user_query)['hits']
-                    if sleep_res["total"]['value'] == 0 and wake_res["total"]['value']:
-                        wake_contributor += 1
-            else:
-                company_developer = self.get_query_return_contributor_date(
-                    i, repos_list)
-                res = self.es_in.search(
-                    index=self.git_index, body=company_developer)['hits']
-                if res["total"]['value'] > 0:
-                    self.users[i] = res["hits"][0]["_source"]["author_org_name"]
-                    if self.users[i] != self.company:
-                        D0_outside += 1
-                        sleep_user_query = self.get_query_return_contributor_date(
-                            i, repos_list, from_date=(date-timedelta(days=60)), to_date=(date-timedelta(days=30)))
-                        wake_user_query = self.get_query_return_contributor_date(
-                            i, repos_list, from_date=(date-timedelta(days=30)), to_date=date)
-                        sleep_res = self.es_in.search(index=(
-                            self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=sleep_user_query)['hits']
-                        wake_res = self.es_in.search(index=(
-                            self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=wake_user_query)['hits']
-                        if sleep_res["total"]['value'] == 0 and wake_res["total"]['value']:
-                            wake_contributor += 1
-                else:
-                    self.users[i] = "Unknown"
-                    D0_outside += 1
-                    sleep_user_query = self.get_query_return_contributor_date(
-                        i, repos_list, from_date=(date-timedelta(days=60)), to_date=(date-timedelta(days=30)))
-                    wake_user_query = self.get_query_return_contributor_date(
-                        i, repos_list, from_date=(date-timedelta(days=30)), to_date=date)
-                    sleep_res = self.es_in.search(index=(
-                        self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=sleep_user_query)['hits']
-                    wake_res = self.es_in.search(index=(
-                        self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=wake_user_query)['hits']
-                    if sleep_res["total"]['value'] == 0 and wake_res["total"]['value']:
-                        wake_contributor += 1
+    #     for i in D0_users:
+    #         if i in self.users:
+    #             if self.users[i] != self.company:
+    #                 D0_outside += 1
+    #                 sleep_user_query = self.get_query_return_contributor_date(
+    #                     i, repos_list, from_date=(date-timedelta(days=60)), to_date=(date-timedelta(days=30)))
+    #                 wake_user_query = self.get_query_return_contributor_date(
+    #                     i, repos_list, from_date=(date-timedelta(days=30)), to_date=date)
+    #                 sleep_res = self.es_in.search(index=(
+    #                     self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=sleep_user_query)['hits']
+    #                 wake_res = self.es_in.search(index=(
+    #                     self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=wake_user_query)['hits']
+    #                 if sleep_res["total"]['value'] == 0 and wake_res["total"]['value']:
+    #                     wake_contributor += 1
+    #         else:
+    #             company_developer = self.get_query_return_contributor_date(
+    #                 i, repos_list)
+    #             res = self.es_in.search(
+    #                 index=self.git_index, body=company_developer)['hits']
+    #             if res["total"]['value'] > 0:
+    #                 self.users[i] = res["hits"][0]["_source"]["author_org_name"]
+    #                 if self.users[i] != self.company:
+    #                     D0_outside += 1
+    #                     sleep_user_query = self.get_query_return_contributor_date(
+    #                         i, repos_list, from_date=(date-timedelta(days=60)), to_date=(date-timedelta(days=30)))
+    #                     wake_user_query = self.get_query_return_contributor_date(
+    #                         i, repos_list, from_date=(date-timedelta(days=30)), to_date=date)
+    #                     sleep_res = self.es_in.search(index=(
+    #                         self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=sleep_user_query)['hits']
+    #                     wake_res = self.es_in.search(index=(
+    #                         self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=wake_user_query)['hits']
+    #                     if sleep_res["total"]['value'] == 0 and wake_res["total"]['value']:
+    #                         wake_contributor += 1
+    #             else:
+    #                 self.users[i] = "Unknown"
+    #                 D0_outside += 1
+    #                 sleep_user_query = self.get_query_return_contributor_date(
+    #                     i, repos_list, from_date=(date-timedelta(days=60)), to_date=(date-timedelta(days=30)))
+    #                 wake_user_query = self.get_query_return_contributor_date(
+    #                     i, repos_list, from_date=(date-timedelta(days=30)), to_date=date)
+    #                 sleep_res = self.es_in.search(index=(
+    #                     self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=sleep_user_query)['hits']
+    #                 wake_res = self.es_in.search(index=(
+    #                     self.C0_index, self.git_index, self.issue_index, self.pr_index, self.pr_comments_index, self.issue_comments_index), body=wake_user_query)['hits']
+    #                 if sleep_res["total"]['value'] == 0 and wake_res["total"]['value']:
+    #                     wake_contributor += 1
 
-        return wake_contributor, D0_outside
+    #     return wake_contributor, D0_outside
 
     # C2, D2count in last 90 days
     def contributor_count_D2(self, date, repos_list):
@@ -1578,26 +1579,13 @@ class DeveloperAttractionRetention(MetricsModel):
         return query
 
     # Turn to C0 contributor
-    def C0_convertions(self, date, repos_list):
-        outside_C0_contributors = 0
+    def all_C0_convertions(self, date, repos_list):
+        C0_count = 0
+
         for i in self.all_C0:
-            if str_to_datetime(i["grimoire_creation_date"]) > (date-timedelta(days=90)) and str_to_datetime(i["grimoire_creation_date"]) < date:
-                if i['author_name'] in self.users and self.users[i['author_name']] != self.company:
-                    outside_C0_contributors += 1
-                elif i["author_name"] not in self.users:
-                    company_developer = self.get_query_return_contributor_date(
-                        i['author_name'], repos_list)
-                    res = self.es_in.search(
-                        index=self.git_index, body=company_developer)['hits']
-                    if res["total"]['value'] > 0:
-                        self.users[i["author_name"]
-                                   ] = res["hits"][0]["_source"]["author_org_name"]
-                        if self.users[i["author_name"]] != self.company:
-                            outside_C0_contributors += 1
-                    else:
-                        self.users[i["author_name"]] = "Unknown"
-                        outside_C0_contributors += 1
-        return outside_C0_contributors
+            if str_to_datetime(i["grimoire_creation_date"])>(date-timedelta(days=90)) and str_to_datetime(i["grimoire_creation_date"])<date:
+                C0_count += 1
+        return C0_count
 
    
     def all_C1_convertions(self, date, repos_list):
@@ -1790,6 +1778,7 @@ class DeveloperAttractionRetention(MetricsModel):
 
             activity_D0_contributors = self.D0_contributors(date, repos_list)
             activity_D1_contributors = self.D1_contributors(date, repos_list)
+            C0_convertions_all = self.all_C0_convertions(date, repos_list)
             C1_convertions_all = self.all_C1_convertions(date, repos_list)
             C2_convertions_all = self.all_C2_convertions(date, repos_list)
             # recontribute_all_D0_count = self.recontribute_ALL_D0_count(
@@ -1809,6 +1798,7 @@ class DeveloperAttractionRetention(MetricsModel):
                 # 'recontribute_all_D0_count_sum': recontribute_all_D0_count[1],
                 'all_D1_still_active': D1_active_all[1],
                 'all_D1_still_active_sum': D1_active_all[0],
+                'C0_convertions_all': C0_convertions_all,
                 'C1_attraction_count': C1_convertions_all,
                 'C2_attraction_count': C2_convertions_all[1],
                 'C2_convertion_Time_all': C2_convertions_all[0],
